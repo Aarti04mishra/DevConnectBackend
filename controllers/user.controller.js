@@ -15,7 +15,7 @@ module.exports.registerUser = async (req, res) => {
         }
 
         const {
-            fullname,    // ← Changed from fullName to fullname
+            fullname,    
             email,
             password,
             university,
@@ -166,6 +166,76 @@ module.exports.loginUser = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        });
+    }
+};
+
+module.exports.searchUsers = async (req, res) => {
+    try {
+        const { q } = req.query;
+        
+        if (!q || q.trim().length < 2) {
+            return res.json({
+                success: true,
+                data: []
+            });
+        }
+
+        // Search by fullname (case insensitive, starts with query)
+        const users = await User.find({
+            fullname: { $regex: `^${q}`, $options: 'i' },
+            status: 'active'
+        })
+        .select('_id fullname university skillLevel profile.avatar')
+        .limit(10);
+
+        res.json({
+            success: true,
+            data: users
+        });
+
+    } catch (error) {
+        console.error('Search error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Search failed',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        });
+    }
+};
+
+module.exports.getUserProfile = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: 'User ID is required'
+            });
+        }
+
+        const user = await User.findById(userId)
+            .select('-password -socketID -preferences');
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: user
+        });
+
+    } catch (error) {
+        console.error('Get profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get user profile',
             error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
         });
     }

@@ -78,7 +78,9 @@ router.post('/login', [
         .withMessage('Password cannot be empty')
 ], userController.loginUser);
 
+router.get('/search', userController.searchUsers);
 
+router.get('/profile/:userId', userController.getUserProfile);
 
 module.exports = router;
 

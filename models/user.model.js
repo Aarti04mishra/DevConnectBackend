@@ -52,6 +52,7 @@ const userSchema = mongoose.Schema({
             'Robotics'
         ]
     }],
+    
     socialProfiles: {
         github: {
             type: String,
@@ -79,13 +80,18 @@ const userSchema = mongoose.Schema({
         maxLength: [500, 'Bio cannot exceed 500 characters'],
         trim: true
     },
-    socketID: {
-        type: String
+    socketID: { 
+        type: String, 
+        default: null 
     },
-    status: {
-        type: String,
-        enum: ['active', 'inactive', 'busy'],
-        default: 'active'
+    status: { 
+        type: String, 
+        enum: ['active', 'inactive', 'busy'], 
+        default: 'inactive' 
+    },
+    lastActive: { 
+        type: Date, 
+        default: Date.now 
     },
     profile: {
         avatar: {
@@ -141,13 +147,38 @@ const userSchema = mongoose.Schema({
         }
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
 });
 
 // Index for efficient queries
 userSchema.index({ email: 1 });
 userSchema.index({ skillLevel: 1, interests: 1 });
 userSchema.index({ 'profile.lastActive': -1 });
+
+// Virtual for followers count
+userSchema.virtual('followersCount', {
+    ref: 'Follow',
+    localField: '_id',
+    foreignField: 'following',
+    count: true
+});
+
+// Virtual for following count
+userSchema.virtual('followingCount', {
+    ref: 'Follow',
+    localField: '_id',
+    foreignField: 'follower',
+    count: true
+});
+
+// Update last active timestamp
+userSchema.methods.updateLastActive = function() {
+    this.lastActive = new Date();
+    this.profile.lastActive = new Date();
+    return this.save();
+};
 
 // Generate JWT token
 userSchema.methods.getAuthToken = function() {
@@ -162,6 +193,11 @@ userSchema.methods.getAuthToken = function() {
     );
     return token;
 };
+
+// Virtual for checking if users are connected
+userSchema.virtual('isConnected').get(function() {
+    return this.stats.connectionsCount > 0;
+});
 
 // Compare password for login
 userSchema.methods.comparePassword = async function(password) {
@@ -205,12 +241,6 @@ userSchema.methods.calculateProfileCompletion = function() {
     return this.profile.completionPercentage;
 };
 
-// Update last active timestamp
-userSchema.methods.updateLastActive = function() {
-    this.profile.lastActive = new Date();
-    return this.save();
-};
-
 // Get user's public profile (excluding sensitive data)
 userSchema.methods.getPublicProfile = function() {
     const userObject = this.toObject();
@@ -218,6 +248,12 @@ userSchema.methods.getPublicProfile = function() {
     delete userObject.socketID;
     delete userObject.preferences;
     return userObject;
+};
+
+// Get user's profile with follow counts
+userSchema.methods.getProfileWithCounts = async function() {
+    await this.populate(['followersCount', 'followingCount']);
+    return this.getPublicProfile();
 };
 
 // Find users with similar interests
