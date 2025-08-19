@@ -42,6 +42,10 @@ const projectSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
+  collaborationPurpose: [{
+  type: String,
+  trim: true
+}],
   isActive: {
     type: Boolean,
     default: true

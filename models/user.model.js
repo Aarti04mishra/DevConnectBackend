@@ -53,6 +53,24 @@ const userSchema = mongoose.Schema({
         ]
     }],
     
+    // Add projects array to store all projects (created and collaborated)
+    projects: [{
+        projectId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Project',
+            required: true
+        },
+        role: {
+            type: String,
+            enum: ['owner', 'collaborator'],
+            required: true
+        },
+        joinedAt: {
+            type: Date,
+            default: Date.now
+        }
+    }],
+    
     socialProfiles: {
         github: {
             type: String,
@@ -173,6 +191,51 @@ userSchema.virtual('followingCount', {
     count: true
 });
 
+// Method to add project to user's projects array
+userSchema.methods.addProject = function(projectId, role = 'owner') {
+    const existingProject = this.projects.find(p => p.projectId.toString() === projectId.toString());
+    if (!existingProject) {
+        this.projects.push({ projectId, role });
+        if (role === 'owner') {
+            this.stats.projectsCreated += 1;
+        } else {
+            this.stats.projectsJoined += 1;
+        }
+    }
+    return this.save();
+};
+
+// Method to remove project from user's projects array
+userSchema.methods.removeProject = function(projectId) {
+    const projectIndex = this.projects.findIndex(p => p.projectId.toString() === projectId.toString());
+    if (projectIndex !== -1) {
+        const removedProject = this.projects[projectIndex];
+        this.projects.splice(projectIndex, 1);
+        
+        if (removedProject.role === 'owner') {
+            this.stats.projectsCreated = Math.max(0, this.stats.projectsCreated - 1);
+        } else {
+            this.stats.projectsJoined = Math.max(0, this.stats.projectsJoined - 1);
+        }
+    }
+    return this.save();
+};
+
+// Get user's projects by role
+userSchema.methods.getProjectsByRole = function(role) {
+    return this.projects.filter(p => p.role === role);
+};
+
+// Get user's owned projects
+userSchema.methods.getOwnedProjects = function() {
+    return this.getProjectsByRole('owner');
+};
+
+// Get user's collaborated projects
+userSchema.methods.getCollaboratedProjects = function() {
+    return this.getProjectsByRole('collaborator');
+};
+
 // Update last active timestamp
 userSchema.methods.updateLastActive = function() {
     this.lastActive = new Date();
@@ -256,6 +319,23 @@ userSchema.methods.getProfileWithCounts = async function() {
     return this.getPublicProfile();
 };
 
+// Get user's projects with population
+userSchema.methods.getProjectsWithDetails = async function() {
+    await this.populate({
+        path: 'projects.projectId',
+        populate: {
+            path: 'owner collaborators.userId',
+            select: 'fullname email profile.avatar'
+        }
+    });
+    
+    return {
+        allProjects: this.projects,
+        ownedProjects: this.projects.filter(p => p.role === 'owner'),
+        collaboratedProjects: this.projects.filter(p => p.role === 'collaborator')
+    };
+};
+
 // Find users with similar interests
 userSchema.statics.findSimilarUsers = function(userId, interests, skillLevel) {
     return this.find({
@@ -281,12 +361,20 @@ userSchema.pre('save', async function(next) {
     next();
 });
 
-// Pre-save middleware to update timestamps
+// Pre-save middleware to update timestamps and sync stats
 userSchema.pre('save', function(next) {
     if (this.isNew) {
         this.profile.joinedDate = new Date();
     }
     this.profile.lastActive = new Date();
+    
+    // Sync stats with actual project counts
+    const ownedProjects = this.projects.filter(p => p.role === 'owner');
+    const collaboratedProjects = this.projects.filter(p => p.role === 'collaborator');
+    
+    this.stats.projectsCreated = ownedProjects.length;
+    this.stats.projectsJoined = collaboratedProjects.length;
+    
     next();
 });
 

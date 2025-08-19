@@ -171,7 +171,7 @@ module.exports.loginUser = async (req, res) => {
     }
 };
 
-module.exports.searchUsers = async (req, res) => {
+module.exports.generalUserSearch = async (req, res) => {
     try {
         const { q } = req.query;
         
@@ -208,6 +208,7 @@ module.exports.searchUsers = async (req, res) => {
 module.exports.getUserProfile = async (req, res) => {
     try {
         const { userId } = req.params;
+        console.log('Fetching profile for userId:', userId);
 
         if (!userId) {
             return res.status(400).json({
@@ -216,8 +217,28 @@ module.exports.getUserProfile = async (req, res) => {
             });
         }
 
+        // First, get user without population to see raw data
+        const rawUser = await User.findById(userId).select('-password -socketID -preferences');
+        console.log('Raw user projects array:', JSON.stringify(rawUser.projects, null, 2));
+
+        // Find user and populate projects with necessary details
         const user = await User.findById(userId)
-            .select('-password -socketID -preferences');
+            .select('-password -socketID -preferences')
+            .populate({
+                path: 'projects.projectId',
+                select: 'title description techStack projectStatus collaborationPurpose githubUrl liveUrl collaborators owner createdAt updatedAt',
+                populate: [
+                    {
+                        path: 'collaborators.userId',
+                        select: 'fullname email profile.avatar'
+                    },
+                    {
+                        path: 'owner',
+                        select: 'fullname email profile.avatar'
+                    }
+                ]
+            })
+            .lean();
 
         if (!user) {
             return res.status(404).json({
@@ -225,6 +246,51 @@ module.exports.getUserProfile = async (req, res) => {
                 message: 'User not found'
             });
         }
+
+        console.log('Populated user projects:', JSON.stringify(user.projects, null, 2));
+
+        // Transform the projects array to match frontend expectations
+        const transformedProjects = user.projects
+            .filter(projectRef => {
+                console.log('Processing project ref:', projectRef);
+                return projectRef.projectId;
+            })
+            .map(projectRef => {
+                console.log('Transforming project:', projectRef.projectId);
+                return {
+                    ...projectRef.projectId,
+                    userRole: projectRef.role,
+                    joinedAt: projectRef.joinedAt
+                };
+            });
+
+        console.log('Transformed projects:', JSON.stringify(transformedProjects, null, 2));
+
+        // Replace the projects array with transformed data
+        user.projects = transformedProjects;
+
+        // Add computed fields that might be missing
+        if (!user.stats) {
+            user.stats = {
+                connectionsCount: 0,
+                reputation: 0,
+                projectsCount: transformedProjects.length
+            };
+        }
+
+        // Update project count in stats
+        user.stats.projectsCount = transformedProjects.length;
+
+        // Add missing fields that frontend expects
+        user.isOnline = user.status === 'active' || false;
+        user.lastSeen = user.profile?.lastActive ? 
+            new Date(user.profile.lastActive).toLocaleDateString() : 'Recently';
+        user.joinDate = user.createdAt || user.profile?.joinedDate || new Date();
+
+        console.log('Final user data being sent:', {
+            projectsCount: user.projects.length,
+            hasProjects: user.projects.length > 0
+        });
 
         res.json({
             success: true,
@@ -236,6 +302,36 @@ module.exports.getUserProfile = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to get user profile',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        });
+    }
+};
+
+module.exports.logoutUser = async (req, res) => {
+    try {
+        const userId = req.user._id; // Assuming you have user data from auth middleware
+
+        // Update user's last active timestamp and clear socket ID if exists
+        await User.findByIdAndUpdate(userId, {
+            'profile.lastActive': new Date(),
+            socketID: null // Clear socket connection if using real-time features
+        });
+
+        // If you're using token blacklisting, you can add the token to a blacklist
+        // const token = req.headers.authorization?.split(' ')[1];
+        // await TokenBlacklist.create({ token, expiresAt: new Date(Date.now() + 24*60*60*1000) });
+
+        res.status(200).json({
+            success: true,
+            message: 'Logout successful'
+        });
+
+    } catch (error) {
+        console.error('Logout error:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
             error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
         });
     }

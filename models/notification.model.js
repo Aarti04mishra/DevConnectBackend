@@ -13,7 +13,9 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
     type: String,
-    enum: ['follow', 'project_invite', 'message', 'project_update'],
+    enum: ['follow', 'project_invite', 'message', 'project_update',  'collaboration_request',      // Add this
+    'collaboration_accepted',     // Add this  
+    'collaboration_rejected', ],
     required: true
 },
     message: {

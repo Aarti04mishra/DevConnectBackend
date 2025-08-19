@@ -3,8 +3,8 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const User = require('../models/user.model');
 const userController=require('../controllers/user.controller')
-
-
+const { authMiddleware } = require('../Middleware/authMiddleware'); 
+const Project=require('../models/project.model');
 router.post('/register',[
  body('fullname')
         .notEmpty()
@@ -78,9 +78,57 @@ router.post('/login', [
         .withMessage('Password cannot be empty')
 ], userController.loginUser);
 
-router.get('/search', userController.searchUsers);
+router.get('/search', userController.generalUserSearch);
 
 router.get('/profile/:userId', userController.getUserProfile);
+
+router.get('/projects', authMiddleware, async (req, res) => {
+  try {
+    // Find projects where user is either owner OR collaborator
+    const projects = await Project.find({
+      $or: [
+        { owner: req.user.id }, // User is owner
+        { 'collaborators.userId': req.user.id } // User is collaborator
+      ]
+    })
+      .populate('collaborators.userId', 'fullname email')
+      .populate('owner', 'fullname email')
+      .sort({ createdAt: -1 });
+
+    // Transform the data to match frontend expectations
+    const transformedProjects = projects.map(project => ({
+      ...project.toObject(),
+      // Add user's role in this project
+      userRole: project.owner._id.toString() === req.user.id ? 'owner' : 'collaborator',
+      // Filter out current user from collaborators list
+      collaborators: project.collaborators
+        .filter(collab => collab.userId._id.toString() !== req.user.id)
+        .map(collab => ({
+          id: collab.userId._id,
+          name: collab.userId.fullname,
+          email: collab.userId.email,
+          joinedAt: collab.joinedAt
+        }))
+    }));
+
+    const stats = {
+      projectsCompleted: projects.filter(p => p.projectStatus === 'completed').length,
+      projectsOwned: projects.filter(p => p.owner._id.toString() === req.user.id).length,
+      projectsCollaborated: projects.filter(p => p.owner._id.toString() !== req.user.id).length,
+      connectionsMode: 0, // You can calculate this based on your needs
+      profileViews: 0 // You can calculate this based on your needs
+    };
+
+    res.json({
+      projects: transformedProjects,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 module.exports = router;
 
