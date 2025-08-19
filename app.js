@@ -13,7 +13,13 @@ app.use(express.json());
 app.use(express.urlencoded({
     extended:true
 }));
-app.use(cors())
+app.use(cors({
+  origin: [
+    "http://localhost:5173",           
+    "https://devconnect-fsc2.onrender.com" 
+  ],
+  credentials: true
+}));
 
 const userRoutes=require('./routes/user.router')
 const followRoutes = require('./routes/follow.router');
